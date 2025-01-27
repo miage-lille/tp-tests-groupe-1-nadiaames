@@ -1,97 +1,112 @@
-import { FastifyInstance } from 'fastify';
-import { AppContainer } from 'src/container';
-import { webinarRoutes } from 'src/webinars/routes';
-import { buildFastifyApp } from 'src/shared/fastify-app';
+import fastify, { FastifyInstance } from 'fastify';
+import { webinarRoutes } from './routes';
+import { container } from 'src/container';
 import { PrismaClient } from '@prisma/client';
+import { Webinar } from 'src/webinars/entities/webinar.entity';
+import { User } from 'src/users/entities/user.entity';
 
-describe('Webinar Routes', () => {
+describe('Feature: Webinar routes', () => {
   let app: FastifyInstance;
-  let container: AppContainer;
+  let prismaClient: PrismaClient;
 
-  beforeAll(async () => {
-    container = new AppContainer();
-    const prismaClient = new PrismaClient();
-    await prismaClient.$connect();
-    container.init(prismaClient);
-
-    app = buildFastifyApp();
-    app.register((app, opts, done) => {
-      webinarRoutes(app, opts);
-      done();
-    }, container);
-    await app.ready();
+  const testUser = new User({
+    id: 'test-user',
+    email: 'test@test.com',
+    password: 'fake',
   });
 
-  afterAll(async () => {
-    await app.close();
-    await container.getPrismaClient().$disconnect();
+  const testWebinar = new Webinar({
+    id: 'webinar-id',
+    organizerId: testUser.props.id,
+    title: 'Webinar title',
+    startDate: new Date('2024-01-01T00:00:00Z'),
+    endDate: new Date('2024-01-01T01:00:00Z'),
+    seats: 100,
+  });
+
+  beforeAll(async () => {
+    prismaClient = new PrismaClient();
+    container.init(prismaClient);
+
+    app = fastify();
+    app.register(webinarRoutes, container);
+    await app.ready();
+
+    await prismaClient.webinar.deleteMany();
   });
 
   beforeEach(async () => {
-    await container.getPrismaClient().webinar.deleteMany();
+    await prismaClient.webinar.deleteMany();
   });
 
-  it('should change the number of seats', async () => {
-    await container.getPrismaClient().webinar.create({
-      data: {
-        id: 'webinar-1',
-        organizerId: 'test-user',
-        title: 'My Webinar',
-        startDate: new Date('2024-01-10T10:00:00.000Z'),
-        endDate: new Date('2024-01-10T11:00:00.000Z'),
-        seats: 100,
-      },
-    });
-
-    const response = await app.inject({
-      method: 'POST',
-      url: '/webinars/webinar-1/seats',
-      payload: { seats: '200' },
-    });
-
-    expect(response.statusCode).toBe(200);
-    expect(response.json()).toEqual({ message: 'Seats updated' });
-
-    const updatedWebinar = await container
-      .getPrismaClient()
-      .webinar.findUnique({ where: { id: 'webinar-1' } });
-    expect(updatedWebinar?.seats).toBe(200);
+  afterAll(async () => {
+    await prismaClient.$disconnect();
+    await app.close();
   });
 
-  it('should return 404 if webinar not found', async () => {
-    const response = await app.inject({
-      method: 'POST',
-      url: '/webinars/non-existent-webinar/seats',
-      payload: { seats: '200' },
+  describe('Scenario: Change seats', () => {
+    it('should return 200 when seats are updated', async () => {
+      await prismaClient.webinar.create({
+        data: {
+          id: testWebinar.props.id,
+          title: testWebinar.props.title,
+          startDate: testWebinar.props.startDate,
+          endDate: testWebinar.props.endDate,
+          seats: testWebinar.props.seats,
+          organizerId: testWebinar.props.organizerId,
+        },
+      });
+
+      const response = await app.inject({
+        method: 'POST',
+        url: `/webinars/${testWebinar.props.id}/seats`,
+        payload: { seats: '200' },
+      });
+
+      expect(response.statusCode).toEqual(200);
+      expect(response.json()).toEqual({ message: 'Seats updated' });
+
+      const updatedWebinar = await prismaClient.webinar.findUnique({
+        where: { id: testWebinar.props.id },
+      });
+      expect(updatedWebinar?.seats).toEqual(200);
     });
 
-    expect(response.statusCode).toBe(404);
-    expect(response.json()).toEqual({
-      error: 'Webinar not found',
-    });
-  });
+    it('should return 404 when webinar is not found', async () => {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/webinars/unknown-id/seats',
+        payload: { seats: '200' },
+      });
 
-  it('should return 401 if user is not the organizer', async () => {
-    await container.getPrismaClient().webinar.create({
-      data: {
-        id: 'webinar-1',
-        organizerId: 'another-user',
-        title: 'My Webinar',
-        startDate: new Date('2024-01-10T10:00:00.000Z'),
-        endDate: new Date('2024-01-10T11:00:00.000Z'),
-        seats: 100,
-      },
+      expect(response.statusCode).toEqual(404);
+      expect(response.json()).toEqual({
+        error: 'Webinar not found',
+      });
     });
 
-    const response = await app.inject({
-      method: 'POST',
-      url: '/webinars/webinar-1/seats',
-      payload: { seats: '200' },
-    });
+    it('should return 401 when user is not the organizer', async () => {
+      await prismaClient.webinar.create({
+        data: {
+          id: testWebinar.props.id,
+          title: testWebinar.props.title,
+          startDate: testWebinar.props.startDate,
+          endDate: testWebinar.props.endDate,
+          seats: testWebinar.props.seats,
+          organizerId: 'another-organizer-id', // Another organizer
+        },
+      });
 
-    expect(response.statusCode).toBe(401);
-    expect(response.json()).toEqual({
-      error: 'User is not allowed to update this webinar',
+      const response = await app.inject({
+        method: 'POST',
+        url: `/webinars/${testWebinar.props.id}/seats`,
+        payload: { seats: '200' },
+      });
+
+      expect(response.statusCode).toEqual(401);
+      expect(response.json()).toEqual({
+        error: 'User is not allowed to update this webinar',
+      });
     });
   });
 });

@@ -1,109 +1,57 @@
 // Test d'intégration
 // C. Ecriture de notre premier test d'intégration
 import { PrismaClient } from '@prisma/client';
-import { PrismaWebinarRepository } from 'src/webinars/adapters/webinar-repository.prisma';
-import { Webinar } from 'src/webinars/entities/webinar.entity';
+import { PrismaWebinarRepository } from './webinar-repository.prisma';
+import { Webinar } from '../entities/webinar.entity';
 
-describe('PrismaWebinarRepository', () => {
+describe('Feature: PrismaWebinarRepository', () => {
   let prismaClient: PrismaClient;
   let webinarRepository: PrismaWebinarRepository;
 
-  beforeAll(async () => {
-    prismaClient = new PrismaClient();
-    await prismaClient.$connect();
-    webinarRepository = new PrismaWebinarRepository(prismaClient);
-  });
-
-  afterAll(async () => {
-    await prismaClient.$disconnect();
+  const webinar = new Webinar({
+    id: 'webinar-id',
+    organizerId: 'organizer-id',
+    title: 'Webinar title',
+    startDate: new Date('2024-01-01T00:00:00Z'),
+    endDate: new Date('2024-01-01T01:00:00Z'),
+    seats: 100,
   });
 
   beforeEach(async () => {
+    prismaClient = new PrismaClient();
+    webinarRepository = new PrismaWebinarRepository(prismaClient);
+
+    // Nettoyer la base de données avant chaque test
     await prismaClient.webinar.deleteMany();
   });
 
-  it('should create a webinar', async () => {
-    const webinar = new Webinar({
-      id: 'webinar-1',
-      organizerId: 'organizer-1',
-      title: 'My Webinar',
-      startDate: new Date('2024-01-10T10:00:00.000Z'),
-      endDate: new Date('2024-01-10T11:00:00.000Z'),
-      seats: 100,
-    });
+  afterEach(async () => {
+    await prismaClient.$disconnect();
+  });
 
-    await webinarRepository.create(webinar);
+  describe('Scenario: Save and find a webinar', () => {
+    it('should save and retrieve a webinar', async () => {
+      // Act
+      await webinarRepository.create(webinar);
+      const foundWebinar = await webinarRepository.findById('webinar-id');
 
-    const createdWebinar = await prismaClient.webinar.findUnique({
-      where: { id: 'webinar-1' },
-    });
-    expect(createdWebinar).toEqual({
-      id: 'webinar-1',
-      organizerId: 'organizer-1',
-      title: 'My Webinar',
-      startDate: new Date('2024-01-10T10:00:00.000Z'),
-      endDate: new Date('2024-01-10T11:00:00.000Z'),
-      seats: 100,
+      // Assert
+      expect(foundWebinar?.props).toEqual(webinar.initialState);
     });
   });
 
-  it('should find a webinar by id', async () => {
-    await prismaClient.webinar.create({
-      data: {
-        id: 'webinar-1',
-        organizerId: 'organizer-1',
-        title: 'My Webinar',
-        startDate: new Date('2024-01-10T10:00:00.000Z'),
-        endDate: new Date('2024-01-10T11:00:00.000Z'),
-        seats: 100,
-      },
-    });
+  describe('Scenario: Update a webinar', () => {
+    it('should update the webinar', async () => {
+      // Arrange
+      await webinarRepository.create(webinar);
+      webinar.update({ seats: 200 });
 
-    const webinar = await webinarRepository.findById('webinar-1');
-    expect(webinar).toBeInstanceOf(Webinar);
-    expect(webinar?.props).toEqual({
-      id: 'webinar-1',
-      organizerId: 'organizer-1',
-      title: 'My Webinar',
-      startDate: new Date('2024-01-10T10:00:00.000Z'),
-      endDate: new Date('2024-01-10T11:00:00.000Z'),
-      seats: 100,
-    });
-  });
+      // Act
+      await webinarRepository.update(webinar);
+      const updatedWebinar = await webinarRepository.findById('webinar-id');
 
-  it('should update a webinar', async () => {
-    await prismaClient.webinar.create({
-      data: {
-        id: 'webinar-1',
-        organizerId: 'organizer-1',
-        title: 'My Webinar',
-        startDate: new Date('2024-01-10T10:00:00.000Z'),
-        endDate: new Date('2024-01-10T11:00:00.000Z'),
-        seats: 100,
-      },
-    });
-
-    const webinar = new Webinar({
-      id: 'webinar-1',
-      organizerId: 'organizer-1',
-      title: 'My Webinar Updated',
-      startDate: new Date('2024-01-10T10:00:00.000Z'),
-      endDate: new Date('2024-01-10T11:00:00.000Z'),
-      seats: 200,
-    });
-
-    await webinarRepository.update(webinar);
-
-    const updatedWebinar = await prismaClient.webinar.findUnique({
-      where: { id: 'webinar-1' },
-    });
-    expect(updatedWebinar).toEqual({
-      id: 'webinar-1',
-      organizerId: 'organizer-1',
-      title: 'My Webinar Updated',
-      startDate: new Date('2024-01-10T10:00:00.000Z'),
-      endDate: new Date('2024-01-10T11:00:00.000Z'),
-      seats: 200,
+      // Assert
+      expect(updatedWebinar?.props.seats).toEqual(200);
     });
   });
 });
